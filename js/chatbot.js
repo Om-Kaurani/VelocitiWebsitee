@@ -51,7 +51,7 @@
     { k: ['github', 'code sample', 'see your code'],
       a: "Each team member's GitHub profile is linked on their card in the Team section.",
       link: { href: 'index.html#team', label: 'View team & GitHub links' } },
-    { k: ['project', 'work', 'portfolio', 'past work', 'examples', 'built before', 'case stud'],
+    { k: ['team project', "team's project", 'teams project', 'project', 'work', 'portfolio', 'past work', 'examples', 'built before', 'case stud'],
       a: "Some of our work: Restaurant Owner Portfolio, Nexus Financial Dashboard, Sentinel AI, CargoStream AI, Vitality HealthTrack, and Gesture UI.",
       link: { href: 'projects.html', label: 'View all projects' } },
     { k: ['meeting', 'call', 'schedule', 'book', 'talk to someone'],
@@ -84,6 +84,32 @@
   ];
 
   const FALLBACK = "I don't have an answer for that one — email us at velocitistudio@gmail.com or use the inquiry form and we'll get back to you directly.";
+
+  // --- Optional Groq AI fallback ---
+  // Set this to your deployed Cloudflare Worker URL to enable it (see the chat for the Worker code).
+  // Leave as '' to keep the bot fully rule-based, free, and with no network calls.
+  const AI_PROXY_URL = 'https://velociti-studio-chat.om-kaurani-18052008.workers.dev/'; // e.g. 'https://velociti-chat-proxy.yourname.workers.dev'
+
+  async function getAnswer(text) {
+    const ruleResult = matchAnswer(text);
+    const isFallback = ruleResult.html === escapeHtml(FALLBACK);
+
+    if (!isFallback || !AI_PROXY_URL) {
+      return ruleResult;
+    }
+
+    try {
+      const res = await fetch(AI_PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      });
+      const data = await res.json();
+      return { html: escapeHtml(data.reply || FALLBACK) };
+    } catch (e) {
+      return ruleResult; // network/Worker issue — fall back to the rule-based message
+    }
+  }
 
   const SUGGESTIONS = [
     { label: 'Our services', q: 'What services do you offer?' },
@@ -137,14 +163,24 @@
       }
     }
 
+    // Score every entry instead of stopping at the first keyword hit — whichever entry's
+    // best-matching keyword is the longest/most specific wins (e.g. "team project" beats "team").
+    let bestEntry = null;
+    let bestLen = 0;
     for (const entry of KB) {
-      if (entry.k.some(kw => cleaned.includes(kw))) {
-        let html = escapeHtml(entry.a);
-        if (entry.link) {
-          html += ` <a href="${entry.link.href}" class="vs-link">${escapeHtml(entry.link.label)} →</a>`;
+      for (const kw of entry.k) {
+        if (cleaned.includes(kw) && kw.length > bestLen) {
+          bestLen = kw.length;
+          bestEntry = entry;
         }
-        return { html };
       }
+    }
+    if (bestEntry) {
+      let html = escapeHtml(bestEntry.a);
+      if (bestEntry.link) {
+        html += ` <a href="${bestEntry.link.href}" class="vs-link">${escapeHtml(bestEntry.link.label)} →</a>`;
+      }
+      return { html };
     }
     return { html: escapeHtml(FALLBACK) };
   }
@@ -491,16 +527,16 @@
       saveHistory(history);
 
       const typingRow = showTyping();
+      const minDelay = new Promise(resolve => setTimeout(resolve, 450));
 
-      setTimeout(() => {
+      Promise.all([getAnswer(text), minDelay]).then(([result]) => {
         typingRow.remove();
-        const result = matchAnswer(text);
         renderMessage(messages, result.html, 'bot');
         history.push({ html: result.html, sender: 'bot' });
         saveHistory(history);
         if (result.showSuggestions) renderSuggestions();
         speak(htmlToPlainText(result.html));
-      }, 450);
+      });
     }
 
     function send() {
