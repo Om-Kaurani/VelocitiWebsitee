@@ -85,30 +85,43 @@
 
   const FALLBACK = "I don't have an answer for that one — email us at velocitistudio@gmail.com or use the inquiry form and we'll get back to you directly.";
 
-  // --- Optional Groq AI fallback ---
-  // Set this to your deployed Cloudflare Worker URL to enable it (see the chat for the Worker code).
-  // Leave as '' to keep the bot fully rule-based, free, and with no network calls.
+  // --- Groq AI is the primary brain for real questions ---
+  // Set this to your deployed Cloudflare Worker URL. Leave as '' to run fully rule-based instead.
   const AI_PROXY_URL = 'https://velociti-studio-chat.om-kaurani-18052008.workers.dev/'; // e.g. 'https://velociti-chat-proxy.yourname.workers.dev'
 
+  // Turns Groq's "[label](url)" markdown-style links into real, safe <a> tags.
+  // Only relative site pages are allowed through — anything with "://" or "javascript:" is stripped
+  // down to plain text, so the model can never inject an arbitrary or malicious link.
+  function formatAiReply(rawText) {
+    let escaped = escapeHtml(rawText);
+    escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
+      const isSafe = !/:\/\//.test(url) && !/^javascript/i.test(url);
+      return isSafe ? `<a href="${url}" class="vs-link">${label} →</a>` : label;
+    });
+    return escaped;
+  }
+
   async function getAnswer(text) {
-    const ruleResult = matchAnswer(text);
-    const isFallback = ruleResult.html === escapeHtml(FALLBACK);
+    // Smalltalk (greetings, thanks, bye, help) is handled instantly and locally — no need to
+    // spend an API call on "hi". Everything substantive goes to Groq.
+    const smalltalk = matchSmalltalk(text);
+    if (smalltalk) return smalltalk;
 
-    if (!isFallback || !AI_PROXY_URL) {
-      return ruleResult;
+    if (AI_PROXY_URL) {
+      try {
+        const res = await fetch(AI_PROXY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text }),
+        });
+        const data = await res.json();
+        if (data.reply) return { html: formatAiReply(data.reply) };
+      } catch (e) {
+        // Worker/network issue — fall through to the rule-based KB below as a safety net.
+      }
     }
 
-    try {
-      const res = await fetch(AI_PROXY_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
-      });
-      const data = await res.json();
-      return { html: escapeHtml(data.reply || FALLBACK) };
-    } catch (e) {
-      return ruleResult; // network/Worker issue — fall back to the rule-based message
-    }
+    return matchAnswer(text);
   }
 
   const SUGGESTIONS = [
@@ -134,34 +147,41 @@
     return m.trim().toLowerCase().replace(/[!.?]+$/, '');
   }
 
-  function matchAnswer(msg) {
+  // Instant, free, local responses for small talk — handled before any API call is made.
+  function matchSmalltalk(msg) {
     const cleaned = normalize(msg);
     const wordCount = cleaned.split(/\s+/).filter(Boolean).length;
     const firstWord = cleaned.split(/\s+/)[0] || '';
 
-    if (wordCount <= 3) {
-      if (GREETING_WORDS.includes(firstWord)) {
-        return { html: 'Hello! How can I help you today?' };
-      }
-      if (THANKS_PHRASES.includes(cleaned)) {
-        return { html: "You're welcome! Anything else I can help with?" };
-      }
-      if (BYE_PHRASES.includes(cleaned)) {
-        return { html: 'Thanks for stopping by! Feel free to reach out anytime at velocitistudio@gmail.com.' };
-      }
-      if (cleaned === 'how are you' || cleaned === 'hows it going') {
-        return { html: "I'm doing great, thanks for asking! How can I help you today?" };
-      }
-      if (['who are you', 'what is your name', "what's your name"].includes(cleaned)) {
-        return { html: `I'm ${BOT_NAME} — here to help answer questions about our services, pricing, process, and team.` };
-      }
-      if (['are you a bot', 'are you real', 'are you human', 'are you ai'].includes(cleaned)) {
-        return { html: `I'm ${BOT_NAME}, an automated assistant for Velociti Studio. For anything I can't help with, our team is just an email away.` };
-      }
-      if (['help', 'what can you do', 'options', 'menu'].includes(cleaned)) {
-        return { html: 'I can help with questions about our services, pricing, process, team, past projects, and how to get in touch. What would you like to know?', showSuggestions: true };
-      }
+    if (wordCount > 3) return null;
+
+    if (GREETING_WORDS.includes(firstWord)) {
+      return { html: 'Hello! How can I help you today?' };
     }
+    if (THANKS_PHRASES.includes(cleaned)) {
+      return { html: "You're welcome! Anything else I can help with?" };
+    }
+    if (BYE_PHRASES.includes(cleaned)) {
+      return { html: 'Thanks for stopping by! Feel free to reach out anytime at velocitistudio@gmail.com.' };
+    }
+    if (cleaned === 'how are you' || cleaned === 'hows it going') {
+      return { html: "I'm doing great, thanks for asking! How can I help you today?" };
+    }
+    if (['who are you', 'what is your name', "what's your name"].includes(cleaned)) {
+      return { html: `I'm ${BOT_NAME} — here to help answer questions about our services, pricing, process, and team.` };
+    }
+    if (['are you a bot', 'are you real', 'are you human', 'are you ai'].includes(cleaned)) {
+      return { html: `I'm ${BOT_NAME}, an automated assistant for Velociti Studio. For anything I can't help with, our team is just an email away.` };
+    }
+    if (['help', 'what can you do', 'options', 'menu'].includes(cleaned)) {
+      return { html: 'I can help with questions about our services, pricing, process, team, past projects, and how to get in touch. What would you like to know?', showSuggestions: true };
+    }
+    return null;
+  }
+
+  // Rule-based KB lookup — used only as a safety net if Groq/the Worker is unreachable.
+  function matchAnswer(msg) {
+    const cleaned = normalize(msg);
 
     // Score every entry instead of stopping at the first keyword hit — whichever entry's
     // best-matching keyword is the longest/most specific wins (e.g. "team project" beats "team").
