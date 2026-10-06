@@ -78,7 +78,7 @@
   }
 
   // Section H2s
-  ['#vision h2', '#values h2', '#work h2', '#process h2', '#team h2', '#contact h2']
+  ['#vision h2', '#values h2', '#work h2', '#technologies h2', '#process h2', '#team h2', '#testimonials h2', '#contact h2']
     .forEach(sel => {
       const el = document.querySelector(sel);
       if (el) splitAndReveal(el, el.closest('section'));
@@ -168,7 +168,7 @@
   // ── Batched Eyebrow reveals ─────────────────────────────────────────────
   ScrollTrigger.batch(
     '#vision .eyebrow, #values .eyebrow, #work .eyebrow,' +
-    '#process .eyebrow, #team .eyebrow, #contact .eyebrow', 
+    '#technologies .eyebrow, #process .eyebrow, #team .eyebrow, #testimonials .eyebrow, #contact .eyebrow', 
     {
       start: 'top 90%',
       once: true,
@@ -311,6 +311,12 @@
     revealFrom('.team-card', teamSection, { stagger: 0.1, y: 28, duration: 0.9 });
   }
 
+  // ── Testimonials ───────────────────────────────────────────────────────────
+  const testimonialsSection = document.querySelector('#testimonials');
+  if (testimonialsSection) {
+    revealFrom('.testimonial-video-wrapper', testimonialsSection, { y: 28, duration: 0.9 });
+  }
+
   // ── CTA / Contact ─────────────────────────────────────────────────────────
   const contactSection = document.querySelector('#contact');
   if (contactSection) {
@@ -426,6 +432,7 @@
     addHoverLift('.bento-card', -5);
     addHoverLift('.team-card',  -5);
     addHoverLift('.case-study', -4);
+    addHoverLift('.testimonial-video-wrapper', -4);
   }
 
 
@@ -466,7 +473,7 @@
     const BIG   = { width: '24px', height: '24px', opacity: '0.75' };
     const SMALL = { width: '10px', height: '10px', opacity: '1'    };
 
-    document.querySelectorAll('a, button, .bento-card, .team-card, .case-study, .button, .time-btn').forEach(el => {
+    document.querySelectorAll('a, button, video, .bento-card, .team-card, .case-study, .button, .time-btn, .testimonial-video-wrapper').forEach(el => {
       el.addEventListener('mouseenter', () => Object.assign(dot.style, BIG));
       el.addEventListener('mouseleave', () => Object.assign(dot.style, SMALL));
     });
